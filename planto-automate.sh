@@ -6,6 +6,7 @@ echo "🚀 Starting Planto automated setup with prerequisites check..."
 PID_FILE="/tmp/planto_server.pid"
 SETUP_STATUS_FILE="/tmp/planto_setup_status"
 DOCKER_CONTAINERS_FILE="/tmp/planto_docker_containers"
+TEMP_SCRIPT="$HOME/planto-setup-helper.sh"  # Changed to home directory
 
 # Colors for better output
 RED='\033[0;31m'
@@ -335,7 +336,7 @@ cleanup() {
     fi
     
     # Always clean up temporary files
-    rm -f "$SETUP_STATUS_FILE" "$DOCKER_CONTAINERS_FILE"
+    rm -f "$SETUP_STATUS_FILE" "$DOCKER_CONTAINERS_FILE" "$TEMP_SCRIPT"
 }
 
 # Set up signal handlers only for interrupts
@@ -383,12 +384,14 @@ print_success "✅ Server started successfully (PID: $SERVER_PID)"
 # Initialize status file
 echo "waiting" > "$SETUP_STATUS_FILE"
 
-# Create a temporary script for the new terminal
-TEMP_SCRIPT=$(mktemp /tmp/planto-setup.XXXXXX)
-cat > "$TEMP_SCRIPT" <<EOT
+# Create a temporary script in home directory
+cat > "$TEMP_SCRIPT" <<'EOT'
 #!/bin/zsh
-SETUP_STATUS_FILE="$SETUP_STATUS_FILE"
-PID_FILE="$PID_FILE"
+# This script runs in a new terminal window
+
+# Setup environment
+SETUP_STATUS_FILE="$1"
+PID_FILE="$2"
 
 # Colors for better output
 RED='\033[0;31m'
@@ -399,9 +402,9 @@ NC='\033[0m' # No Color
 
 # Function to cleanup and signal failure
 cleanup_and_exit() {
-    echo "failed" > "\$SETUP_STATUS_FILE"
+    echo "failed" > "$SETUP_STATUS_FILE"
     echo ""
-    echo -e "\${RED}❌ Setup cancelled. Cleaning up...\${NC}"
+    echo -e "${RED}❌ Setup cancelled. Cleaning up...${NC}"
     exit 1
 }
 
@@ -409,13 +412,13 @@ cleanup_and_exit() {
 trap cleanup_and_exit INT TERM
 
 clear
-echo -e "\${BLUE}🔑 PLANTO API KEY SETUP\${NC}"
+echo -e "${BLUE}🔑 PLANTO API KEY SETUP${NC}"
 echo "======================="
 echo ""
-echo -e "\${YELLOW}❗ IMPORTANT: You need to provide your OPENROUTER_API_KEY to continue\${NC}"
+echo -e "${YELLOW}❗ IMPORTANT: You need to provide your OPENROUTER_API_KEY to continue${NC}"
 echo "   If you don't have one, visit: https://openrouter.ai/"
 echo ""
-echo -e "\${YELLOW}⚠️  WARNING: If you cancel or don't provide the key, the server will be stopped\${NC}"
+echo -e "${YELLOW}⚠️  WARNING: If you cancel or don't provide the key, the server will be stopped${NC}"
 echo ""
 
 # Get API key with timeout
@@ -428,38 +431,38 @@ while true; do
     read -r "openrouter_key?Enter your OPENROUTER_API_KEY: "
     
     # Check if user pressed Ctrl+C or provided empty input
-    if [ \$? -ne 0 ] || [ -z "\$openrouter_key" ]; then
+    if [ $? -ne 0 ] || [ -z "$openrouter_key" ]; then
         echo ""
-        echo -e "\${RED}❌ No API key provided or cancelled\${NC}"
+        echo -e "${RED}❌ No API key provided or cancelled${NC}"
         cleanup_and_exit
     fi
     
     # Basic validation - check if it looks like an API key
-    if [[ "\$openrouter_key" =~ ^[a-zA-Z0-9_-]+\$ ]] && [ \${#openrouter_key} -gt 10 ]; then
+    if [[ "$openrouter_key" =~ ^[a-zA-Z0-9_-]+$ ]] && [ ${#openrouter_key} -gt 10 ]; then
         break
     else
         echo ""
-        echo -e "\${YELLOW}⚠️  Invalid API key format. Please try again.\${NC}"
+        echo -e "${YELLOW}⚠️  Invalid API key format. Please try again.${NC}"
         echo "   API keys should be alphanumeric with dashes/underscores and longer than 10 characters"
         echo ""
     fi
 done
 
-export OPENROUTER_API_KEY=\$openrouter_key
+export OPENROUTER_API_KEY=$openrouter_key
 echo ""
-echo -e "\${GREEN}✅ API key set successfully\${NC}"
+echo -e "${GREEN}✅ API key set successfully${NC}"
 echo ""
 
-echo -e "\${BLUE}❗ STEP 2: Installing Planto CLI...\${NC}"
+echo -e "${BLUE}❗ STEP 2: Installing Planto CLI...${NC}"
 if curl -sL https://plandex.ai/install.sh | bash; then
-    echo -e "\${GREEN}✅ CLI installed successfully\${NC}"
+    echo -e "${GREEN}✅ CLI installed successfully${NC}"
 else
-    echo -e "\${RED}❌ CLI installation failed\${NC}"
+    echo -e "${RED}❌ CLI installation failed${NC}"
     cleanup_and_exit
 fi
 
 echo ""
-echo -e "\${BLUE}❗ STEP 3: Running sign-in process...\${NC}"
+echo -e "${BLUE}❗ STEP 3: Running sign-in process...${NC}"
 echo "   (This will simulate the exact keypresses you described)"
 echo ""
 
@@ -506,32 +509,32 @@ EOF
 
 # Check if the sign-in was successful by testing plandex
 echo ""
-echo -e "\${BLUE}🔍 Verifying sign-in status...\${NC}"
+echo -e "${BLUE}🔍 Verifying sign-in status...${NC}"
 if timeout 10 plandex auth 2>/dev/null | grep -q "local-admin@plandex.ai"; then
-    echo -e "\${GREEN}✅ Sign-in verified successfully!\${NC}"
+    echo -e "${GREEN}✅ Sign-in verified successfully!${NC}"
     SIGNIN_SUCCESS=true
 else
-    echo -e "\${YELLOW}⚠️  Sign-in verification inconclusive, but continuing...\${NC}"
+    echo -e "${YELLOW}⚠️  Sign-in verification inconclusive, but continuing...${NC}"
     SIGNIN_SUCCESS=true
 fi
 
-if [ "\$SIGNIN_SUCCESS" = true ]; then
+if [ "$SIGNIN_SUCCESS" = true ]; then
     echo ""
-    echo -e "\${GREEN}✅ Sign-in complete!\${NC}"
-    echo "success" > "\$SETUP_STATUS_FILE"
+    echo -e "${GREEN}✅ Sign-in complete!${NC}"
+    echo "success" > "$SETUP_STATUS_FILE"
 else
     echo ""
-    echo -e "\${RED}❌ Sign-in failed\${NC}"
+    echo -e "${RED}❌ Sign-in failed${NC}"
     cleanup_and_exit
 fi
 
 echo ""
-echo -e "\${GREEN}🎉 SETUP COMPLETE!\${NC}"
+echo -e "${GREEN}🎉 SETUP COMPLETE!${NC}"
 echo "================="
 echo ""
-echo -e "\${GREEN}✅ Planto server is running\${NC}"
-echo -e "\${GREEN}✅ API key is configured\${NC}"
-echo -e "\${GREEN}✅ CLI is installed and signed in\${NC}"
+echo -e "${GREEN}✅ Planto server is running${NC}"
+echo -e "${GREEN}✅ API key is configured${NC}"
+echo -e "${GREEN}✅ CLI is installed and signed in${NC}"
 echo ""
 echo "You can now use 'plandex' in any project directory"
 echo "Try it now in this terminal:"
@@ -540,21 +543,22 @@ echo ""
 
 # Keep terminal open
 read -r "dummy?Press enter to exit..."
-rm -f "\$0"
+rm -f "$0"
 EOT
 
-# Make the temp script executable
+# Make the script executable
 chmod +x "$TEMP_SCRIPT"
 
-# Open new terminal and execute the script (macOS specific)
+# Open new terminal and execute the script with proper arguments
 print_status "🔑 Opening new terminal for API key setup..."
 print_status "   Please complete the setup in the new terminal window"
 echo ""
 
+# Use osascript to open a new Terminal window and execute our script
 osascript <<EOF
 tell application "Terminal"
     activate
-    do script "exec '$TEMP_SCRIPT'"
+    do script "exec /bin/zsh '$TEMP_SCRIPT' '$SETUP_STATUS_FILE' '$PID_FILE'"
 end tell
 EOF
 
