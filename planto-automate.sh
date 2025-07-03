@@ -293,63 +293,53 @@ store_initial_containers() {
 
 # Cleanup function to stop server, processes, and Docker containers
 cleanup() {
-    print_status "🧹 Cleaning up processes and Docker containers..."
-    
-    # Stop the server process
-    if [ -f "$PID_FILE" ]; then
-        SERVER_PID=$(cat "$PID_FILE")
-        if ps -p "$SERVER_PID" > /dev/null 2>&1; then
-            print_status "🛑 Stopping Planto server (PID: $SERVER_PID)..."
-            kill "$SERVER_PID" 2>/dev/null
-            # Wait a bit, then force kill if necessary
-            sleep 3
+    # Only show cleanup message if we're interrupting
+    if [ "$1" != "normal" ]; then
+        print_status "🧹 Cleaning up processes and Docker containers..."
+        
+        # Stop the server process
+        if [ -f "$PID_FILE" ]; then
+            SERVER_PID=$(cat "$PID_FILE")
             if ps -p "$SERVER_PID" > /dev/null 2>&1; then
-                print_warning "⚠️  Force killing server..."
-                kill -9 "$SERVER_PID" 2>/dev/null
+                print_status "🛑 Stopping Planto server (PID: $SERVER_PID)..."
+                kill "$SERVER_PID" 2>/dev/null
+                sleep 3
+                if ps -p "$SERVER_PID" > /dev/null 2>&1; then
+                    kill -9 "$SERVER_PID" 2>/dev/null
+                fi
+            fi
+            rm -f "$PID_FILE"
+        fi
+        
+        # Kill any remaining planto processes
+        pkill -f "start_local.sh" 2>/dev/null
+        pkill -f "planto" 2>/dev/null
+        
+        # Stop Docker containers
+        print_status "🐳 Stopping Docker containers..."
+        if command_exists docker; then
+            # Get current Planto containers
+            CURRENT_CONTAINERS=$(get_planto_containers)
+            
+            if [ -n "$CURRENT_CONTAINERS" ]; then
+                print_status "🛑 Stopping Planto Docker containers..."
+                echo "$CURRENT_CONTAINERS" | while read -r container_id; do
+                    if [ -n "$container_id" ]; then
+                        print_status "   Stopping container: $container_id"
+                        docker stop "$container_id" 2>/dev/null || true
+                    fi
+                done
             fi
         fi
-        rm -f "$PID_FILE"
+        print_success "✅ Cleanup complete"
     fi
     
-    # Kill any remaining planto processes
-    pkill -f "start_local.sh" 2>/dev/null
-    pkill -f "planto" 2>/dev/null
-    
-    # Stop Docker containers
-    print_status "🐳 Stopping Docker containers..."
-    if command_exists docker; then
-        # Get current Planto containers
-        CURRENT_CONTAINERS=$(get_planto_containers)
-        
-        if [ -n "$CURRENT_CONTAINERS" ]; then
-            print_status "🛑 Stopping Planto Docker containers..."
-            echo "$CURRENT_CONTAINERS" | while read -r container_id; do
-                if [ -n "$container_id" ]; then
-                    print_status "   Stopping container: $container_id"
-                    docker stop "$container_id" 2>/dev/null || true
-                    # Optionally remove the container (uncomment if needed)
-                    # docker rm "$container_id" 2>/dev/null || true
-                fi
-            done
-        else
-            print_status "ℹ️  No Planto Docker containers found to stop"
-        fi
-        
-        # Alternative: Stop all containers if you want to be more aggressive
-        # Uncomment the following lines if you want to stop ALL Docker containers
-        # print_status "🛑 Stopping all Docker containers..."
-        # docker stop $(docker ps -q) 2>/dev/null || true
-    else
-        print_warning "⚠️  Docker not found, skipping Docker cleanup"
-    fi
-    
-    # Clean up temporary files
+    # Always clean up temporary files
     rm -f "$SETUP_STATUS_FILE" "$DOCKER_CONTAINERS_FILE"
-    print_success "✅ Cleanup complete"
 }
 
-# Set up signal handlers
-trap cleanup EXIT INT TERM
+# Set up signal handlers only for interrupts
+trap 'cleanup interrupt' INT TERM
 
 # Main script execution starts here
 echo "🔧 PLANTO AUTOMATED SETUP"
@@ -545,7 +535,7 @@ echo -e "\${GREEN}✅ CLI is installed and signed in\${NC}"
 echo ""
 echo "You can now use 'plandex' in any project directory"
 echo "Try it now in this terminal:"
-echo "   \$ plandex"
+echo "   \$ planto"
 echo ""
 
 # Keep terminal open
@@ -588,21 +578,25 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
         "success")
             echo ""
             print_success "🎉 Setup completed successfully!"
-            print_success "✅ Planto server is running and configured"
+            print_success "✅ Planto server is running in the background (PID: $SERVER_PID)"
             print_success "✅ You can now use 'plandex' in any project directory"
             echo ""
-            print_status "Server will continue running in the background"
-            print_status "To stop the server later, run: kill $SERVER_PID"
-            if command_exists docker; then
-                print_status "🐳 Docker containers are also running - they will be stopped when this script exits"
-            fi
+            print_status "To stop the server later, run:"
+            echo "   kill $SERVER_PID"
+            echo ""
+            print_status "To stop Docker containers (if any), run:"
+            echo "   docker stop \$(docker ps -q --filter name=planto)"
+            echo ""
+            
+            # Exit without cleanup (server keeps running)
+            cleanup normal
             exit 0
             ;;
         "failed")
             echo ""
             print_error "❌ Setup failed or was cancelled"
             print_status "🛑 Stopping server and cleaning up..."
-            cleanup
+            cleanup interrupt
             exit 1
             ;;
         "waiting")
@@ -620,5 +614,5 @@ echo ""
 print_warning "⏰ Timeout reached (5 minutes)"
 print_error "❌ Setup did not complete in time"
 print_status "🛑 Stopping server and cleaning up..."
-cleanup
+cleanup interrupt
 exit 1
